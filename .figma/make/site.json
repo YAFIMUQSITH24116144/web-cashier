@@ -1,0 +1,10 @@
+{
+  "description": "An offline Windows desktop POS system for restaurants and cafes to manage orders, payments, products, and sales reports with a clean, efficient interface.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
