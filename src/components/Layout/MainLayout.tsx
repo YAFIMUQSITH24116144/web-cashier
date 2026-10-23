@@ -1,16 +1,17 @@
 import { Sidebar } from './Sidebar';
-import { Header } from './Header';
-import type { PageName } from '@/types';
+import type { AppSettings, PageName } from '@/types';
 
 interface MainLayoutProps {
   currentPage: PageName;
   onNavigate: (page: PageName) => void;
+  settings: AppSettings;
   children: React.ReactNode;
 }
 
 export function MainLayout({
   currentPage,
   onNavigate,
+  settings,
   children,
 }: MainLayoutProps) {
   return (
@@ -20,13 +21,11 @@ export function MainLayout({
       <Sidebar
         currentPage={currentPage}
         onNavigate={onNavigate}
+        settings={settings}
       />
 
       {/* Main Area */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-
-        {/* Header */}
-        <Header currentPage={currentPage} />
 
         {/* Page Content */}
         <main

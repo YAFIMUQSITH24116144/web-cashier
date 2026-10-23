@@ -1,16 +1,25 @@
 import { useState } from 'react';
 import { Search, Plus, Minus, X, ShoppingCart, CheckCircle2, Printer, ChevronRight, ImageOff } from 'lucide-react';
 import { formatRupiah, generateReceiptNumber, generateId } from '@/utils/format';
-import { categories } from '@/data/mockData';
-import type { Product, Order, OrderItem, ToastMessage } from '@/types';
+import type {
+  Product,
+  Order,
+  OrderItem,
+  ToastMessage,
+  Category,
+  AppSettings,
+} from '@/types';
+import { saveOrderToDatabase } from '@/services/orderService';
 
 interface OrdersProps {
   products: Product[];
+  categories: Category[];
   addOrder: (order: Order) => void;
+  settings: AppSettings;
   showToast: (message: string, type?: ToastMessage['type']) => void;
 }
 
-export function Orders({ products, addOrder, showToast }: OrdersProps) {
+export function Orders({ products, categories, addOrder, settings, showToast }: OrdersProps) {
   const [search, setSearch] = useState('');
   const [selectedCat, setSelectedCat] = useState('all');
   const [cart, setCart] = useState<OrderItem[]>([]);
@@ -48,8 +57,15 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
 
   const subtotal = cart.reduce((s, i) => s + i.product.price * i.quantity, 0);
 
-  const handleSaveOrder = () => {
-    if (cart.length === 0) { showToast('Keranjang masih kosong', 'error'); return; }
+  const handleSaveOrder = async () => {
+    if (cart.length === 0) {
+      showToast(
+        'Keranjang masih kosong',
+        'error'
+      );
+      return;
+    }
+
     const order: Order = {
       id: generateId(),
       receiptNumber: generateReceiptNumber(),
@@ -58,14 +74,51 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
       total: subtotal,
       status: 'menunggu',
       createdAt: new Date(),
-      cashierName: 'Siti Rahma',
-      tableNumber: tableNumber || undefined,
+      cashierName: settings.cashierName || 'Kasir',
+      tableNumber:
+        tableNumber || undefined,
     };
-    addOrder(order);
-    setSavedOrder(order);
-    setCart([]);
-    setTableNumber('');
-    showToast(`Pesanan ${order.receiptNumber} berhasil disimpan`);
+
+    console.log(
+      'ORDER BARU:',
+      order
+    );
+
+    console.log(
+      'INVOICE BARU:',
+      order.receiptNumber
+    );
+
+    try {
+      // Simpan ke SQLite terlebih dahulu
+      await saveOrderToDatabase(order);
+
+      // Jika database berhasil, baru update React state
+      addOrder(order);
+
+      setSavedOrder(order);
+      setCart([]);
+      setTableNumber('');
+
+      showToast(
+        `Pesanan ${order.receiptNumber} berhasil disimpan`
+      );
+    } catch (error) {
+      console.error(
+        'Gagal menyimpan order:',
+        error
+      );
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      showToast(
+        `Gagal menyimpan pesanan: ${errorMessage}`,
+        'error'
+      );
+    }
   };
 
   const handleNewOrder = () => {
@@ -77,81 +130,159 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
   // Success state
   if (savedOrder) {
     return (
-      <div className="flex items-center justify-center min-h-full p-6">
+      <div className="flex min-h-full items-center justify-center p-6">
         <div
           className="
             w-full
             max-w-md
-            rounded-lg
+            rounded-xl
             border
             border-border
             bg-card
-            p-10
+            p-8
             text-center
             shadow-lg
-
-            transition-all
-            duration-200
-
-            hover:border-primary/30
-            hover:shadow-xl
           "
         >
+          {/* Success Icon */}
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
             <CheckCircle2
               size={32}
               className="text-primary"
             />
           </div>
-          <h2 className="mb-1 text-xl font-bold text-foreground">
-            Pesanan Tersimpan!
+
+          {/* Title */}
+          <h2 className="mb-2 text-xl font-bold text-foreground">
+            Pesanan Berhasil Dibuat
           </h2>
-          <p className="mb-6 text-sm text-muted-foreground">
-            Nota telah dibuat dengan status menunggu pembayaran.
+
+          <p className="mb-6 text-sm leading-relaxed text-muted-foreground">
+            Pesanan telah disimpan dan menunggu proses pembayaran oleh kasir.
           </p>
 
-          <div className="mb-6 space-y-3 rounded-md border border-border bg-secondary p-4 text-left">
-            <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Nomor Nota</span>
+          {/* Order Information */}
+          <div className="mb-6 rounded-lg border border-border bg-secondary p-4 text-left">
+            
+            {/* Invoice */}
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                Nomor Nota
+              </span>
+
               <span className="font-mono text-sm font-bold text-primary">
                 {savedOrder.receiptNumber}
               </span>
             </div>
-            {savedOrder.tableNumber && (
-              <div className="flex justify-between">
-                <span className="text-xs text-slate-500">Meja</span>
-                <span className="text-xs font-medium text-slate-800">{savedOrder.tableNumber}</span>
-              </div>
-            )}
-            <div className="space-y-1.5">
+
+            {/* Table */}
+            <div className="flex items-center justify-between py-3 border-b border-border">
+              <span className="text-xs font-medium text-muted-foreground">
+                Nomor Meja
+              </span>
+
+              <span className="text-sm font-semibold text-foreground">
+                {savedOrder.tableNumber || '-'}
+              </span>
+            </div>
+
+            {/* Items */}
+            <div className="space-y-2 py-3">
               {savedOrder.items.map((item) => (
-                <div key={item.product.id} className="flex justify-between">
-                  <span className="text-xs text-slate-600">{item.product.name} ×{item.quantity}</span>
-                  <span className="text-xs font-medium text-slate-800 font-mono-nums">
-                    {formatRupiah(item.product.price * item.quantity)}
+                <div
+                  key={item.product.id}
+                  className="flex items-start justify-between gap-3"
+                >
+                  <span className="text-xs text-muted-foreground">
+                    {item.product.name} × {item.quantity}
+                  </span>
+
+                  <span className="shrink-0 font-mono text-xs font-medium text-foreground">
+                    {formatRupiah(
+                      item.product.price * item.quantity
+                    )}
                   </span>
                 </div>
               ))}
             </div>
-            <div className="flex justify-between pt-2 border-t border-slate-200">
-              <span className="text-sm font-semibold text-slate-800">Total</span>
-              <span className="text-sm font-bold text-slate-900 font-mono-nums">{formatRupiah(savedOrder.total)}</span>
+
+            {/* Total */}
+            <div className="flex items-center justify-between border-t border-border pt-3">
+              <span className="text-sm font-semibold text-foreground">
+                Total Pesanan
+              </span>
+
+              <span className="font-mono text-base font-bold text-primary">
+                {formatRupiah(savedOrder.total)}
+              </span>
             </div>
           </div>
 
-          <p className="text-xs text-slate-400 mb-6">Proses pembayaran di halaman <strong>Kasir & Pembayaran</strong>.</p>
+          {/* Payment Information */}
+          <div className="mb-6 rounded-lg bg-primary/5 px-4 py-3 text-left">
+            <p className="text-xs font-semibold text-foreground">
+              Langkah berikutnya
+            </p>
 
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Silakan lanjutkan ke halaman{' '}
+              <span className="font-semibold text-foreground">
+                Kasir & Pembayaran
+              </span>{' '}
+              untuk memproses pembayaran pelanggan.
+            </p>
+          </div>
+
+          {/* Actions */}
           <div className="flex gap-3">
             <button
-              onClick={() => window.print()}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+              onClick={() => {
+                showToast(
+                  'Printer thermal belum terhubung',
+                  'error'
+                );
+              }}
+              className="
+                flex-1
+                flex
+                items-center
+                justify-center
+                gap-2
+                rounded-lg
+                border
+                border-border
+                bg-secondary
+                px-4
+                py-2.5
+                text-sm
+                font-medium
+                text-foreground
+                transition-colors
+                hover:bg-accent
+              "
             >
               <Printer size={14} />
               Cetak Nota
             </button>
+
             <button
               onClick={handleNewOrder}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors"
+              className="
+                flex-1
+                flex
+                items-center
+                justify-center
+                gap-2
+                rounded-lg
+                bg-primary
+                px-4
+                py-2.5
+                text-sm
+                font-medium
+                text-primary-foreground
+                transition-colors
+                hover:bg-primary/90
+              "
             >
               Pesanan Baru
               <ChevronRight size={14} />
@@ -199,18 +330,45 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
               "
             />
           </div>
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
             <button
               onClick={() => setSelectedCat('all')}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${selectedCat === 'all' ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-secondary text-muted-foreground border border-border hover:bg-secondary/80 hover:text-foreground hover:border-primary/40'}`}
+              className={`
+                shrink-0
+                rounded-lg
+                px-3
+                py-1.5
+                text-xs
+                font-medium
+                transition-all
+                ${
+                  selectedCat === 'all'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'border border-border bg-secondary text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                }
+              `}
             >
               Semua
             </button>
+
             {categories.map((c) => (
               <button
                 key={c.id}
                 onClick={() => setSelectedCat(c.id)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${selectedCat === c.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                className={`
+                  shrink-0
+                  rounded-lg
+                  px-3
+                  py-1.5
+                  text-xs
+                  font-medium
+                  transition-all
+                  ${
+                    selectedCat === c.id
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'border border-border bg-secondary text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                  }
+                `}
               >
                 {c.name}
               </button>
@@ -226,7 +384,7 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
               <p className="text-sm">Tidak ada menu tersedia</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
               {filtered.map((product) => {
                 const qty = cartQty(product.id);
                 return (
@@ -251,7 +409,7 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
                     "
                     onClick={() => addToCart(product)}
                   >
-                    <div className="relative h-28 overflow-hidden bg-secondary">
+                    <div className="relative h-24 overflow-hidden bg-secondary">
                       {product.image ? (
                         <img
                           src={product.image}
@@ -304,8 +462,8 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
       </div>
 
       {/* Right: order summary */}
-      <div className="flex w-80 shrink-0 flex-col bg-card xl:w-96">
-        <div className="border-b border-border px-5 py-4">
+      <div className="flex w-[300px] shrink-0 flex-col bg-card lg:w-[320px] xl:w-[360px]">
+        <div className="border-b border-border px-4 py-3">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-foreground">Ringkasan Pesanan</h2>
             {cart.length > 0 && (
@@ -529,7 +687,7 @@ export function Orders({ products, addOrder, showToast }: OrdersProps) {
         </div>
 
         {/* Summary & save */}
-        <div className="border-t border-border p-5 space-y-3">
+        <div className="border-t border-border p-4 space-y-3">
           <div className="space-y-1.5">
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Subtotal ({cart.reduce((s, i) => s + i.quantity, 0)} item)</span>

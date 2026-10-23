@@ -7,7 +7,7 @@ import {
   WifiOff,
   ChevronRight,
 } from 'lucide-react';
-import type { PageName } from '@/types';
+import type { PageName, AppSettings } from '@/types';
 
 interface NavItem {
   id: PageName;
@@ -26,11 +26,12 @@ const navItems: NavItem[] = [
 interface SidebarProps {
   currentPage: PageName;
   onNavigate: (page: PageName) => void;
+  settings: AppSettings;
 }
 
-export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+export function Sidebar({ currentPage, onNavigate, settings }: SidebarProps) {
   return (
-    <aside className="flex h-full w-64 flex-col bg-card border-r border-border">
+    <aside className="flex h-full w-50 flex-col bg-card border-r border-border">
 
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border">
@@ -53,13 +54,13 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
           </div>
 
           {/* Logo Text */}
-          <div>
-            <p className="text-sm font-bold leading-tight tracking-wide text-foreground">
-              TESTING WARUNG
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold leading-tight tracking-wide text-foreground">
+              {settings.businessName}
             </p>
 
-            <p className="mt-0.5 text-[10px] leading-tight text-muted-foreground">
-              Warung Nusantara
+            <p className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">
+              {settings.businessTagline}
             </p>
           </div>
 
@@ -166,59 +167,6 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         </div>
 
       </nav>
-
-      {/* Footer */}
-      <div className="space-y-3 border-t border-border px-4 py-4">
-
-        {/* Offline Status */}
-        <div
-          className="
-            flex
-            items-center
-            gap-2
-            rounded-md
-            p-2
-            transition-colors
-            duration-200
-            hover:bg-secondary
-          "
-        >
-          {/* Status Icon */}
-          <div
-            className="
-              flex
-              h-6
-              w-6
-              items-center
-              justify-center
-              rounded-full
-              bg-primary/10
-            "
-          >
-            <WifiOff
-              size={11}
-              className="text-primary"
-            />
-          </div>
-
-          {/* Status Text */}
-          <div>
-            <p className="text-[11px] font-medium text-primary">
-              Mode Offline
-            </p>
-
-            <p className="text-[10px] text-muted-foreground">
-              Database lokal aktif
-            </p>
-          </div>
-        </div>
-
-        {/* Version */}
-        <p className="text-[10px] text-muted-foreground">
-          Versi 1.0.0 · © 2026
-        </p>
-
-      </div>
 
     </aside>
   );

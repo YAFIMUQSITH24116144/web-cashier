@@ -15,18 +15,24 @@ import { Modal } from '@/components/ui/Modal';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Badge } from '@/components/ui/Badge';
 import { formatRupiah, generateId } from '@/utils/format';
-import { categories } from '@/data/mockData';
-import type { Product, ToastMessage } from '@/types';
+import type { Product, ToastMessage, Category } from '@/types';
+
+import {
+  saveProductToDatabase,
+  updateProductInDatabase,
+  deleteProductFromDatabase,
+} from '@/services/productService';
 
 interface ProductsProps {
   products: Product[];
+  categories: Category[];
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>;
   showToast: (message: string, type?: ToastMessage['type']) => void;
 }
 
 const emptyForm = {
   name: '',
-  category: 'makanan-berat',
+  category: '',
   price: '',
   image: '',
   available: true,
@@ -36,6 +42,7 @@ export function Products({
   products,
   setProducts,
   showToast,
+  categories,
 }: ProductsProps) {
   const [search, setSearch] = useState('');
   const [selectedCat, setSelectedCat] = useState('all');
@@ -57,7 +64,11 @@ export function Products({
   });
 
   const openAdd = () => {
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      category: categories[0]?.id ?? '',
+    });
+
     setEditingProduct(null);
     setImgError(false);
     setShowModal(true);
@@ -77,8 +88,10 @@ export function Products({
     setShowModal(true);
   };
 
-  const handleSave = () => {
-    const price = parseInt(form.price.replace(/\D/g, ''));
+  const handleSave = async () => {
+    const price = parseInt(
+      form.price.replace(/\D/g, '')
+    );
 
     if (!form.name.trim()) {
       showToast('Nama produk wajib diisi', 'error');
@@ -91,22 +104,45 @@ export function Products({
     }
 
     if (editingProduct) {
-      setProducts((prev) =>
-        prev.map((p) =>
-          p.id === editingProduct.id
-            ? {
-                ...p,
-                name: form.name,
-                category: form.category,
-                price,
-                image: form.image,
-                available: form.available,
-              }
-            : p
-        )
-      );
+      const updatedProduct: Product = {
+        ...editingProduct,
+        name: form.name,
+        category: form.category,
+        price,
+        image: form.image,
+        available: form.available,
+      };
 
-      showToast('Produk berhasil diperbarui');
+      try {
+        await updateProductInDatabase(updatedProduct);
+
+        setProducts((prev) =>
+          prev.map((p) =>
+            p.id === editingProduct.id
+              ? updatedProduct
+              : p
+          )
+        );
+
+        showToast('Produk berhasil diperbarui');
+      } catch (error) {
+        console.error(
+          'Gagal memperbarui produk:',
+          error
+        );
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        showToast(
+          `Database error: ${message}`,
+          'error'
+        );
+
+        return;
+      }
     } else {
       const newProduct: Product = {
         id: generateId(),
@@ -117,28 +153,112 @@ export function Products({
         available: form.available,
       };
 
-      setProducts((prev) => [newProduct, ...prev]);
+      try {
+        await saveProductToDatabase(newProduct);
 
-      showToast('Produk berhasil ditambahkan');
+        setProducts((prev) => [
+          newProduct,
+          ...prev,
+        ]);
+
+        showToast(
+          'Produk berhasil ditambahkan'
+        );
+      } catch (error) {
+        console.error(
+          'Gagal menyimpan produk:',
+          error
+        );
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        showToast(
+          `Database error: ${message}`,
+          'error'
+        );
+
+        return;
+      }
     }
 
     setShowModal(false);
   };
 
-  const handleDelete = (id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    setConfirmDelete(null);
-    showToast('Produk berhasil dihapus', 'warning');
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteProductFromDatabase(id);
+
+      setProducts((prev) =>
+        prev.filter((p) => p.id !== id)
+      );
+
+      setConfirmDelete(null);
+
+      showToast(
+        'Produk berhasil dihapus',
+        'warning'
+      );
+    } catch (error) {
+      console.error(
+        'Gagal menghapus produk:',
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      showToast(
+        `Database error: ${message}`,
+        'error'
+      );
+    }
   };
 
-  const toggleAvail = (id: string) => {
-    setProducts((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? { ...p, available: !p.available }
-          : p
-      )
+  const toggleAvail = async (id: string) => {
+    const product = products.find(
+      (p) => p.id === id
     );
+
+    if (!product) return;
+
+    const updatedProduct: Product = {
+      ...product,
+      available: !product.available,
+    };
+
+    try {
+      await updateProductInDatabase(
+        updatedProduct
+      );
+
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? updatedProduct
+            : p
+        )
+      );
+    } catch (error) {
+      console.error(
+        'Gagal mengubah status produk:',
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : String(error);
+
+      showToast(
+        `Database error: ${message}`,
+        'error'
+      );
+    }
   };
 
   const catName = (id: string) =>
@@ -791,15 +911,30 @@ export function Products({
                     return;
                   }
 
-                  // Buat preview gambar
-                  const imageUrl = URL.createObjectURL(file);
+                  // Ubah gambar menjadi Base64 agar bisa disimpan permanen di SQLite
+                  const reader = new FileReader();
 
-                  setForm({
-                    ...form,
-                    image: imageUrl,
-                  });
+                  reader.onload = () => {
+                    const base64Image = reader.result;
 
-                  setImgError(false);
+                    if (typeof base64Image !== 'string') {
+                      showToast('Gagal membaca gambar', 'error');
+                      return;
+                    }
+
+                    setForm({
+                      ...form,
+                      image: base64Image,
+                    });
+
+                    setImgError(false);
+                  };
+
+                  reader.onerror = () => {
+                    showToast('Gagal membaca gambar', 'error');
+                  };
+
+                  reader.readAsDataURL(file);
                 }}
               />
             </div>

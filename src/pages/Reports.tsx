@@ -1,4 +1,12 @@
 import { useMemo, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import {
+  Directory,
+  Encoding,
+  Filesystem,
+} from '@capacitor/filesystem';
+import { generateSalesReportPdf } from '@/services/reportPdfService';
+import { printReportHtml } from '@/services/reportPrinterService';
 import {
   TrendingUp,
   Receipt,
@@ -7,6 +15,8 @@ import {
   Printer,
   Calendar,
   Award,
+  FileSpreadsheet,
+  FileText,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -319,19 +329,8 @@ export function Reports({ orders }: ReportsProps) {
     );
   }, [filteredOrders]);
 
-  /*
-   * ============================================================
-   * EXPORT EXCEL / CSV
-   * ============================================================
-   */
-
-  const handleExportExcel = () => {
-    if (recentFiltered.length === 0) {
-      alert('Tidak ada data transaksi untuk diekspor.');
-      return;
-    }
-
-    const rows: ReportRow[] = recentFiltered.map((order) => ({
+  const reportRows = useMemo<ReportRow[]>(() => {
+    return recentFiltered.map((order) => ({
       receiptNumber: order.receiptNumber,
       date: formatDateTime(new Date(order.createdAt)),
       item: order.items.reduce(
@@ -342,51 +341,92 @@ export function Reports({ orders }: ReportsProps) {
       paymentMethod: order.paymentMethod ?? '-',
       status: order.status,
     }));
+  }, [recentFiltered]);
 
-    const header = [
-      'Nomor Nota',
-      'Tanggal',
-      'Jumlah Item',
-      'Total',
-      'Metode Pembayaran',
-      'Status',
-    ];
+  /*
+   * ============================================================
+   * EXPORT EXCEL / CSV
+   * ============================================================
+   */
 
-    const csvRows = rows.map((row) => [
-      escapeCsv(row.receiptNumber),
-      escapeCsv(row.date),
-      escapeCsv(row.item),
-      escapeCsv(row.total),
-      escapeCsv(row.paymentMethod.toUpperCase()),
-      escapeCsv(row.status),
-    ]);
+  const handleExportExcel = async () => {
+    if (reportRows.length === 0) {
+      alert('Tidak ada data transaksi untuk diekspor.');
+      return;
+    }
 
-    const csvContent = [
-      header.join(';'),
-      ...csvRows.map((row) => row.join(';')),
-    ].join('\n');
+    try {
+      const header = [
+        'Nomor Nota',
+        'Tanggal',
+        'Jumlah Item',
+        'Total',
+        'Metode Pembayaran',
+        'Status',
+      ];
 
-    const blob = new Blob(
-      [`\uFEFF${csvContent}`],
-      {
-        type: 'text/csv;charset=utf-8;',
+      const csvRows = reportRows.map((row) => [
+        escapeCsv(row.receiptNumber),
+        escapeCsv(row.date),
+        escapeCsv(row.item),
+        escapeCsv(row.total),
+        escapeCsv(row.paymentMethod.toUpperCase()),
+        escapeCsv(row.status),
+      ]);
+
+      const csvContent = [
+        header.join(';'),
+        ...csvRows.map((row) => row.join(';')),
+      ].join('\n');
+
+      const fileName =
+        `laporan-penjualan-${formatDateForInput(new Date())}.csv`;
+
+      if (Capacitor.getPlatform() === 'android') {
+        await Filesystem.writeFile({
+          path: `reports/${fileName}`,
+          data: `\uFEFF${csvContent}`,
+          directory: Directory.Documents,
+          encoding: Encoding.UTF8,
+          recursive: true,
+        });
+
+        alert(
+          `Export Excel berhasil.\n\nFile:\n${fileName}\n\nLokasi:\nDocuments/reports`
+        );
+
+        return;
       }
-    );
 
-    const url = URL.createObjectURL(blob);
+      // Fallback untuk browser/Windows
+      const blob = new Blob(
+        [`\uFEFF${csvContent}`],
+        {
+          type: 'text/csv;charset=utf-8;',
+        }
+      );
 
-    const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
 
-    link.href = url;
-    link.download = `laporan-penjualan-${formatDateForInput(
-      new Date()
-    )}.csv`;
+      link.href = url;
+      link.download = fileName;
 
-    document.body.appendChild(link);
-    link.click();
+      document.body.appendChild(link);
+      link.click();
 
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(
+        'Gagal export Excel:',
+        error
+      );
+
+      alert(
+        'Gagal mengekspor laporan ke Excel.'
+      );
+    }
   };
 
   /*
@@ -395,12 +435,448 @@ export function Reports({ orders }: ReportsProps) {
    * ============================================================
    */
 
-  const handlePrint = () => {
-    window.print();
+  const openPrintableReport = () => {
+    if (reportRows.length === 0) {
+      alert('Tidak ada data transaksi untuk dicetak.');
+      return;
+    }
+
+    const rowsHtml = reportRows
+      .map(
+        (row) => `
+          <tr>
+            <td>${row.receiptNumber}</td>
+            <td>${row.date}</td>
+            <td style="text-align:center">${row.item}</td>
+            <td style="text-align:right">Rp ${row.total.toLocaleString('id-ID')}</td>
+            <td style="text-transform:uppercase">${row.paymentMethod}</td>
+            <td>${row.status}</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    const reportWindow = window.open(
+      '',
+      '_blank',
+      'width=1000,height=700'
+    );
+
+    if (!reportWindow) {
+      alert(
+        'Popup diblokir browser. Izinkan popup untuk mencetak laporan.'
+      );
+      return;
+    }
+
+    reportWindow.document.write(`
+      <!DOCTYPE html>
+      <html lang="id">
+        <head>
+          <meta charset="UTF-8" />
+
+          <title>Laporan Penjualan</title>
+
+          <style>
+            * {
+              box-sizing: border-box;
+            }
+
+            body {
+              margin: 0;
+              padding: 32px;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: white;
+            }
+
+            .header {
+              margin-bottom: 24px;
+              border-bottom: 2px solid #111827;
+              padding-bottom: 16px;
+            }
+
+            .title {
+              font-size: 24px;
+              font-weight: 700;
+              margin-bottom: 6px;
+            }
+
+            .subtitle {
+              color: #6b7280;
+              font-size: 13px;
+            }
+
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 12px;
+              margin-bottom: 24px;
+            }
+
+            .summary-card {
+              border: 1px solid #d1d5db;
+              border-radius: 8px;
+              padding: 14px;
+            }
+
+            .summary-label {
+              font-size: 11px;
+              color: #6b7280;
+              margin-bottom: 5px;
+            }
+
+            .summary-value {
+              font-size: 18px;
+              font-weight: 700;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 12px;
+            }
+
+            th {
+              background: #f3f4f6;
+              text-align: left;
+              font-weight: 700;
+            }
+
+            th,
+            td {
+              border: 1px solid #d1d5db;
+              padding: 8px;
+            }
+
+            .footer {
+              margin-top: 24px;
+              font-size: 11px;
+              color: #6b7280;
+              text-align: right;
+            }
+
+            @media print {
+              body {
+                padding: 12mm;
+              }
+
+              @page {
+                size: A4 landscape;
+                margin: 10mm;
+              }
+            }
+          </style>
+        </head>
+
+        <body>
+          <div class="header">
+            <div class="title">
+              Laporan Penjualan
+            </div>
+
+            <div class="subtitle">
+              Periode: ${periodLabel}
+              &nbsp; · &nbsp;
+              Metode: ${
+                paymentFilter === 'semua'
+                  ? 'Semua Metode'
+                  : paymentFilter.toUpperCase()
+              }
+            </div>
+          </div>
+
+          <div class="summary">
+            <div class="summary-card">
+              <div class="summary-label">
+                Total Pendapatan
+              </div>
+
+              <div class="summary-value">
+                Rp ${totalRevenue.toLocaleString('id-ID')}
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-label">
+                Jumlah Transaksi
+              </div>
+
+              <div class="summary-value">
+                ${totalTransactions}
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-label">
+                Rata-rata Transaksi
+              </div>
+
+              <div class="summary-value">
+                Rp ${avgTransaction.toLocaleString('id-ID')}
+              </div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Nomor Nota</th>
+                <th>Tanggal</th>
+                <th>Item</th>
+                <th>Total</th>
+                <th>Metode</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          <div class="footer">
+            Dicetak pada ${formatDateTime(new Date())}
+          </div>
+        </body>
+      </html>
+    `);
+
+    reportWindow.document.close();
+
+    reportWindow.focus();
+
+    setTimeout(() => {
+      reportWindow.print();
+    }, 300);
   };
 
-  const handleExportPdf = () => {
-    window.print();
+  const buildReportHtml = () => {
+    const rowsHtml = reportRows
+      .map(
+        (row) => `
+          <tr>
+            <td>${row.receiptNumber}</td>
+            <td>${row.date}</td>
+            <td style="text-align:center">${row.item}</td>
+            <td style="text-align:right">
+              ${formatRupiah(row.total)}
+            </td>
+            <td>${row.paymentMethod.toUpperCase()}</td>
+            <td>${row.status.toUpperCase()}</td>
+          </tr>
+        `
+      )
+      .join('');
+
+    return `
+      <!DOCTYPE html>
+
+      <html lang="id">
+
+        <head>
+
+          <meta charset="UTF-8" />
+
+          <style>
+
+            @page {
+              size: A4 landscape;
+              margin: 12mm;
+            }
+
+            * {
+              box-sizing: border-box;
+            }
+
+            body {
+              margin: 0;
+              font-family: Arial, sans-serif;
+              color: #111827;
+              background: white;
+            }
+
+            h1 {
+              margin: 0 0 5px;
+              font-size: 22px;
+            }
+
+            .subtitle {
+              color: #6b7280;
+              font-size: 11px;
+              margin-bottom: 20px;
+            }
+
+            .summary {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 12px;
+              margin-bottom: 20px;
+            }
+
+            .summary-card {
+              border: 1px solid #d1d5db;
+              padding: 12px;
+              border-radius: 8px;
+            }
+
+            .summary-label {
+              color: #6b7280;
+              font-size: 10px;
+            }
+
+            .summary-value {
+              margin-top: 5px;
+              font-size: 16px;
+              font-weight: bold;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 10px;
+            }
+
+            th {
+              background: #f3f4f6;
+              font-weight: bold;
+            }
+
+            th,
+            td {
+              border: 1px solid #d1d5db;
+              padding: 7px;
+              text-align: left;
+            }
+
+            .footer {
+              margin-top: 20px;
+              color: #6b7280;
+              font-size: 9px;
+              text-align: right;
+            }
+
+          </style>
+
+        </head>
+
+        <body>
+
+          <h1>Laporan Penjualan</h1>
+
+          <div class="subtitle">
+            Periode: ${periodLabel}
+            &nbsp; | &nbsp;
+            Metode: ${
+              paymentFilter === 'semua'
+                ? 'Semua Metode'
+                : paymentFilter.toUpperCase()
+            }
+          </div>
+
+          <div class="summary">
+
+            <div class="summary-card">
+              <div class="summary-label">
+                Total Pendapatan
+              </div>
+
+              <div class="summary-value">
+                ${formatRupiah(totalRevenue)}
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-label">
+                Jumlah Transaksi
+              </div>
+
+              <div class="summary-value">
+                ${totalTransactions}
+              </div>
+            </div>
+
+            <div class="summary-card">
+              <div class="summary-label">
+                Rata-rata Transaksi
+              </div>
+
+              <div class="summary-value">
+                ${formatRupiah(avgTransaction)}
+              </div>
+            </div>
+
+          </div>
+
+          <table>
+
+            <thead>
+
+              <tr>
+                <th>Nomor Nota</th>
+                <th>Tanggal</th>
+                <th>Item</th>
+                <th>Total</th>
+                <th>Metode</th>
+                <th>Status</th>
+              </tr>
+
+            </thead>
+
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+
+          </table>
+
+          <div class="footer">
+            Dicetak pada:
+            ${new Date().toLocaleString('id-ID')}
+          </div>
+
+        </body>
+
+      </html>
+    `;
+  };
+
+  const handleExportPdf = async () => {
+    if (reportRows.length === 0) {
+      alert('Tidak ada data transaksi untuk dibuat PDF.');
+      return;
+    }
+
+    try {
+      if (Capacitor.getPlatform() !== 'android') {
+        alert('Export PDF native hanya tersedia di Android.');
+        return;
+      }
+
+      const uri = await generateSalesReportPdf({
+        periodLabel,
+        paymentLabel:
+          paymentFilter === 'semua'
+            ? 'Semua Metode'
+            : paymentFilter.toUpperCase(),
+        totalRevenue,
+        totalTransactions,
+        avgTransaction,
+        rows: reportRows,
+      });
+
+      alert(
+        `PDF berhasil dibuat.\n\nLokasi:\n${uri}`
+      );
+    } catch (error) {
+      console.error(
+        'Gagal membuat PDF:',
+        error
+      );
+
+      alert(
+        'Gagal membuat laporan PDF.'
+      );
+    }
   };
 
   /*
@@ -428,6 +904,21 @@ export function Reports({ orders }: ReportsProps) {
   return (
     <div className="min-h-full bg-background p-6 text-foreground">
       <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-foreground">
+              Laporan Penjualan
+            </h1>
+
+            <p className="mt-1 text-xs text-muted-foreground">
+              Pantau pendapatan, transaksi, dan performa penjualan
+            </p>
+          </div>
+
+          <div className="rounded-lg bg-primary/10 px-3 py-2 text-xs font-medium text-primary">
+            {periodLabel}
+          </div>
+        </div>
 
         {/* ======================================================
             FILTER
@@ -573,81 +1064,49 @@ export function Reports({ orders }: ReportsProps) {
 
             </div>
 
-            {/* Excel */}
-            <button
-              type="button"
-              onClick={handleExportExcel}
-              className="
-                flex
-                items-center
-                gap-1.5
-                rounded-md
-                border
-                border-emerald-500/30
-                bg-emerald-500/10
-                px-3
-                py-1.5
-                text-xs
-                font-medium
-                text-emerald-400
-                transition-all
-                hover:bg-emerald-500/20
-              "
-            >
-              <Download size={12} />
-              Excel
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
 
-            {/* PDF */}
-            <button
-              type="button"
-              onClick={handleExportPdf}
-              className="
-                flex
-                items-center
-                gap-1.5
-                rounded-md
-                border
-                border-red-500/30
-                bg-red-500/10
-                px-3
-                py-1.5
-                text-xs
-                font-medium
-                text-red-400
-                transition-all
-                hover:bg-red-500/20
-              "
-            >
-              <Download size={12} />
-              PDF
-            </button>
+              {/* Excel */}
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="
+                  flex items-center gap-2
+                  rounded-lg
+                  border border-emerald-500/30
+                  bg-emerald-500/10
+                  px-3 py-2
+                  text-xs font-semibold
+                  text-emerald-400
+                  transition-all
+                  hover:bg-emerald-500/20
+                "
+              >
+                <FileSpreadsheet size={14} />
+                Excel
+              </button>
 
-            {/* Print */}
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="
-                flex
-                items-center
-                gap-1.5
-                rounded-md
-                border
-                border-border
-                bg-card
-                px-3
-                py-1.5
-                text-xs
-                font-medium
-                text-foreground
-                transition-all
-                hover:bg-secondary
-              "
-            >
-              <Printer size={12} />
-              Cetak
-            </button>
+              {/* PDF */}
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                className="
+                  flex items-center gap-2
+                  rounded-lg
+                  border border-red-500/30
+                  bg-red-500/10
+                  px-3 py-2
+                  text-xs font-semibold
+                  text-red-400
+                  transition-all
+                  hover:bg-red-500/20
+                "
+              >
+                <FileText size={14} />
+                PDF
+              </button>
 
+            </div>
           </div>
         </div>
 
@@ -696,36 +1155,87 @@ export function Reports({ orders }: ReportsProps) {
 
         {/* ======================================================
             STATISTICS
-        ====================================================== */}
+            ====================================================== */}
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-3 gap-4">
 
-          <StatCard
-            title="Total Pendapatan"
-            value={formatRupiah(totalRevenue)}
-            subtitle="Hanya transaksi lunas"
-            icon={TrendingUp}
-            iconColor="text-indigo-400"
-            iconBg="bg-indigo-500/10"
-          />
+          {/* Total Pendapatan */}
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:border-primary/30 hover:shadow-md">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Total Pendapatan
+                </p>
 
-          <StatCard
-            title="Jumlah Transaksi"
-            value={totalTransactions.toString()}
-            subtitle="Transaksi berhasil"
-            icon={Receipt}
-            iconColor="text-emerald-400"
-            iconBg="bg-emerald-500/10"
-          />
+                <p className="mt-2 truncate text-xl font-bold text-foreground">
+                  {formatRupiah(totalRevenue)}
+                </p>
 
-          <StatCard
-            title="Rata-rata Transaksi"
-            value={formatRupiah(avgTransaction)}
-            subtitle="Per transaksi"
-            icon={BarChart2}
-            iconColor="text-sky-400"
-            iconBg="bg-sky-500/10"
-          />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Dari transaksi lunas
+                </p>
+              </div>
+
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-500/10">
+                <TrendingUp
+                  size={18}
+                  className="text-indigo-400"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Jumlah Transaksi */}
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:border-primary/30 hover:shadow-md">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Jumlah Transaksi
+                </p>
+
+                <p className="mt-2 text-xl font-bold text-foreground">
+                  {totalTransactions}
+                </p>
+
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Transaksi berhasil
+                </p>
+              </div>
+
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
+                <Receipt
+                  size={18}
+                  className="text-emerald-400"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Rata-rata Transaksi */}
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 hover:border-primary/30 hover:shadow-md">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-muted-foreground">
+                  Rata-rata Transaksi
+                </p>
+
+                <p className="mt-2 truncate text-xl font-bold text-foreground">
+                  {formatRupiah(avgTransaction)}
+                </p>
+
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Nilai rata-rata per transaksi
+                </p>
+              </div>
+
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10">
+                <BarChart2
+                  size={18}
+                  className="text-sky-400"
+                />
+              </div>
+            </div>
+          </div>
 
         </div>
 
@@ -852,7 +1362,7 @@ export function Reports({ orders }: ReportsProps) {
                   />
 
                   <Tooltip
-                    formatter={(value: number) => [
+                    formatter={(value) => [
                       formatRupiah(Number(value)),
                       'Pendapatan',
                     ]}
@@ -980,7 +1490,7 @@ export function Reports({ orders }: ReportsProps) {
                   />
 
                   <Tooltip
-                    formatter={(value: number) => [
+                    formatter={(value) => [
                       value,
                       'Terjual',
                     ]}
