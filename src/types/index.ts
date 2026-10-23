@@ -42,6 +42,7 @@ export interface AppSettings {
   businessTagline: string;
   businessAddress: string;
   businessPhone: string;
+  cashierName: string;
   taxRate: number;
   serviceCharge: number;
   receiptFooter: string;

@@ -14,6 +14,7 @@ import {
 import { Modal } from '@/components/ui/Modal';
 import { StatusBadge } from '@/components/ui/Badge';
 import { formatRupiah, formatDateTime } from '@/utils/format';
+import { savePaymentToDatabase } from '@/services/orderService';
 
 import type {
   Order,
@@ -21,6 +22,7 @@ import type {
   PaymentMethod,
   ToastMessage,
 } from '@/types';
+import { printReceipt } from '@/services/receiptPrinter';
 
 interface CashierProps {
   orders: Order[];
@@ -118,7 +120,7 @@ export function Cashier({
     setAmountPaid(digits);
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment =async () => {
     if (!payingOrder) return;
 
     /*
@@ -150,6 +152,33 @@ export function Cashier({
       paidAt: new Date(),
     };
 
+    const updatedOrderData: Order = {
+      ...payingOrder,
+      ...updatedOrder,
+    };
+
+
+    try {
+      await savePaymentToDatabase(updatedOrderData);
+    } catch (error) {
+        console.error(
+          'GAGAL SIMPAN PEMBAYARAN:',
+          error
+        );
+
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        showToast(
+          `Database error: ${errorMessage}`,
+          'error'
+        );
+
+        return;
+      }
+
     /*
      * Update data order
      */
@@ -180,270 +209,60 @@ export function Cashier({
    * ============================================================
    */
 
-  const handlePrintReceipt = (order: Order) => {
-    const printWindow = window.open(
-      '',
-      '_blank',
-      'width=420,height=700'
-    );
+  const handlePrintReceipt = async (order: Order) => {
+    try {
+      await printReceipt({
+        businessName: 'PoS Resto',
+        tagline: 'Warung Nusantara',
 
-    if (!printWindow) {
+        invoiceNumber: order.receiptNumber,
+
+        date: formatDateTime(order.createdAt),
+
+        tableNumber: order.tableNumber,
+
+        cashierName: order.cashierName,
+
+        items: order.items.map((item) => ({
+          name: item.product.name,
+          quantity: item.quantity,
+          price: item.product.price,
+          subtotal:
+            item.product.price * item.quantity,
+        })),
+
+        subtotal: order.subtotal,
+
+        total: order.total,
+
+        amountPaid: order.amountPaid ?? 0,
+
+        change: order.change ?? 0,
+
+        paymentMethod:
+          order.paymentMethod === 'qris'
+            ? 'qris'
+            : 'tunai',
+
+        footer:
+          'Terima kasih atas kunjungan Anda!\nSampai jumpa kembali.',
+      });
+
       showToast(
-        'Popup cetak diblokir browser',
-        'error'
+        'Nota berhasil dikirim ke printer',
+        'success'
+      );
+    } catch (error) {
+      console.error(
+        'Gagal mencetak nota:',
+        error
       );
 
-      return;
+      showToast(
+        'Gagal mencetak nota. Pastikan printer sudah terhubung.',
+        'error'
+      );
     }
-
-    const itemsHtml = order.items
-      .map(
-        (item) => `
-          <tr>
-            <td class="item-name">
-              ${item.product.name}
-              <div class="item-detail">
-                ${item.quantity} × ${formatRupiah(
-                  item.product.price
-                )}
-              </div>
-            </td>
-
-            <td class="item-price">
-              ${formatRupiah(
-                item.product.price * item.quantity
-              )}
-            </td>
-          </tr>
-        `
-      )
-      .join('');
-
-    const paymentHtml =
-      order.paymentMethod === 'tunai'
-        ? `
-          <tr>
-            <td>Dibayar</td>
-            <td class="right">
-              ${formatRupiah(order.amountPaid ?? 0)}
-            </td>
-          </tr>
-
-          <tr>
-            <td>Kembalian</td>
-            <td class="right">
-              ${formatRupiah(order.change ?? 0)}
-            </td>
-          </tr>
-        `
-        : `
-          <tr>
-            <td>Metode Pembayaran</td>
-            <td class="right">
-              QRIS
-            </td>
-          </tr>
-        `;
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-
-      <html>
-        <head>
-          <meta charset="UTF-8" />
-
-          <title>
-            ${order.receiptNumber}
-          </title>
-
-          <style>
-            * {
-              box-sizing: border-box;
-            }
-
-            body {
-              width: 280px;
-              margin: 0 auto;
-              padding: 16px;
-              font-family:
-                Arial,
-                Helvetica,
-                sans-serif;
-              font-size: 12px;
-              color: #000;
-              background: #fff;
-            }
-
-            .center {
-              text-align: center;
-            }
-
-            .restaurant-name {
-              font-size: 19px;
-              font-weight: 700;
-              margin-bottom: 4px;
-            }
-
-            .subtitle {
-              font-size: 11px;
-              color: #555;
-            }
-
-            .line {
-              border-top:
-                1px dashed #000;
-              margin: 12px 0;
-            }
-
-            .info {
-              line-height: 1.7;
-            }
-
-            table {
-              width: 100%;
-              border-collapse:
-                collapse;
-            }
-
-            td {
-              vertical-align:
-                top;
-              padding: 4px 0;
-            }
-
-            .item-name {
-              width: 65%;
-            }
-
-            .item-price {
-              width: 35%;
-              text-align: right;
-              white-space:
-                nowrap;
-            }
-
-            .item-detail {
-              color: #555;
-              font-size: 10px;
-              margin-top: 2px;
-            }
-
-            .right {
-              text-align: right;
-              white-space:
-                nowrap;
-            }
-
-            .total-row td {
-              font-size: 15px;
-              font-weight: 700;
-              padding-top: 7px;
-            }
-
-            .footer {
-              text-align: center;
-              margin-top: 18px;
-              font-size: 10px;
-              line-height: 1.6;
-            }
-
-            @media print {
-              body {
-                width: 100%;
-                margin: 0;
-              }
-            }
-          </style>
-        </head>
-
-        <body>
-
-          <div class="center">
-            <div class="restaurant-name">
-              PoS Resto
-            </div>
-
-            <div class="subtitle">
-              Struk Pembayaran
-            </div>
-          </div>
-
-          <div class="line"></div>
-
-          <div class="info">
-            <strong>Nota:</strong>
-            ${order.receiptNumber}
-            <br />
-
-            <strong>Waktu:</strong>
-            ${formatDateTime(
-              new Date(order.createdAt)
-            )}
-            <br />
-
-            <strong>Meja:</strong>
-            ${order.tableNumber ?? '-'}
-            <br />
-
-            <strong>Kasir:</strong>
-            ${order.cashierName}
-          </div>
-
-          <div class="line"></div>
-
-          <table>
-            ${itemsHtml}
-          </table>
-
-          <div class="line"></div>
-
-          <table>
-
-            <tr>
-              <td>
-                Subtotal
-              </td>
-
-              <td class="right">
-                ${formatRupiah(order.total)}
-              </td>
-            </tr>
-
-            <tr class="total-row">
-              <td>
-                TOTAL
-              </td>
-
-              <td class="right">
-                ${formatRupiah(order.total)}
-              </td>
-            </tr>
-
-            ${paymentHtml}
-
-          </table>
-
-          <div class="line"></div>
-
-          <div class="footer">
-            Terima kasih telah berkunjung
-            <br />
-            Simpan struk ini sebagai
-            bukti pembayaran
-          </div>
-
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-
-    printWindow.focus();
-
-    setTimeout(() => {
-      printWindow.print();
-      printWindow.close();
-    }, 300);
   };
 
   /*

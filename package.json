@@ -14,8 +14,16 @@
     "format": "oxfmt"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.4",
+    "@capawesome/capacitor-file-picker": "^8.1.0",
+    "@fedejm/capacitor-esc-pos-printer": "^0.2.4",
     "better-sqlite3": "^13.0.3",
     "lucide-react": "^1.49.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^3.10.1"

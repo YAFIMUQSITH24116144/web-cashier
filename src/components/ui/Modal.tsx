@@ -47,6 +47,7 @@ export function Modal({
         className="
           absolute
           inset-0
+          z-0
           bg-black/70
           backdrop-blur-[2px]
         "
@@ -57,6 +58,7 @@ export function Modal({
       <div
         className={`
           relative
+          z-10
           flex
           max-h-[90vh]
           w-full
